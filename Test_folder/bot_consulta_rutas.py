@@ -72,60 +72,12 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 
 # Estados de la conversación
-ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN = range(3)
+ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN, ESPERANDO_REPORTE = range(4)
 
-DB_PATH = "transporte.db"
-
-
-# ---------------------------------------------------------------------------
-# conexion base de datos 
-# ---------------------------------------------------------------------------
-
-def guardar_reporte_en_nube(user_id, tipo, texto=None, lat=None, lon=None):
-  """Guarda el reporte directo en la nube de Neon"""
-  user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()
-  fecha = datetime.utcnow().isoformat()
-
-  try:
-    conn = psycopg2.connect(DATABASE_URL)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-            INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (user_hash, tipo, texto, lat, lon, fecha),
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print("✅ Reporte guardado en la nube con éxito.")
-  except Exception as e:
-    print(f"❌ Error guardando en la base de datos: {e}")
 
 # ---------------------------------------------------------------------------
 # Capa de base de datos (SQLite nativo de Python, no requiere instalar nada)
 # ---------------------------------------------------------------------------
-
-def init_db() -> None:
-    """Crea el archivo de base de datos transporte.db y la tabla 'reportes' si no existen."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reportes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_hash TEXT,
-            tipo TEXT,
-            texto TEXT,
-            latitud REAL,
-            longitud REAL,
-            fecha_hora TEXT
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
 
 
 def guardar_dato(
@@ -135,7 +87,7 @@ def guardar_dato(
     lat: float | None = None,
     lon: float | None = None,
 ) -> None:
-    """Guarda un registro en la base de datos.
+    """Guarda un registro directamente en la base de datos PostgreSQL en la nube (Neon).
 
     El user_id se guarda como hash (SHA-256) en vez de en texto plano,
     para no almacenar el ID real de Telegram directamente.
@@ -143,19 +95,26 @@ def guardar_dato(
     user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()
     fecha = datetime.now(timezone.utc).isoformat()
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (user_hash, tipo, texto, lat, lon, fecha),
-    )
-    conn.commit()
-    conn.close()
-
-
+    try:
+        # Usamos psycopg2 y DATABASE_URL en lugar de sqlite3
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        # IMPORTANTE: PostgreSQL usa %s en lugar de ? para las variables
+        cursor.execute(
+            """
+            INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (user_hash, tipo, texto, lat, lon, fecha),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print(f"✅ Reporte tipo '{tipo}' guardado en la nube con éxito.")
+        
+    except Exception as e:
+        print(f"❌ Error guardando en la base de datos de Neon: {e}")
 # ---------------------------------------------------------------------------
 # Capa de datos de rutas (STUBS a reemplazar por la conexión real a tu BD)
 # ---------------------------------------------------------------------------
@@ -301,7 +260,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def recibir_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     texto = update.message.text.strip()
-    guardar_dato(user_id=update.effective_user.id, tipo="texto", texto=texto)
+    texto_lower = texto.lower()
+
+    # 1. DETECTAR INTENCIÓN DE REPORTE
+    palabras_clave = ["reporte", "reportar", "problema", "incidente", "taco", "choque"]
+    if any(palabra in texto_lower for palabra in palabras_clave):
+        await update.message.reply_text(
+            "🚨 *Modo Reporte Activado*\n"
+            "Entendido. Cuéntame con detalle qué está pasando o envíame tu ubicación "
+            "para registrar la incidencia en la base de datos comunitaria:",
+            parse_mode="Markdown"
+        )
+        return ESPERANDO_REPORTE
+
+    # 2. SI NO ES REPORTE, SIGUE EL FLUJO NORMAL DE RUTAS
+    guardar_dato(user_id=update.effective_user.id, tipo="consulta_ruta", texto=texto)
 
     # Si ya teníamos un origen guardado (ej. vino de una ubicación GPS
     # enviada antes de decir el destino), este mensaje es directamente
@@ -331,6 +304,29 @@ async def recibir_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await pedir_origen(update, context)
     return ESPERANDO_ORIGEN
 
+async def procesar_reporte_final(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Guarda el detalle del reporte o la ubicación de la incidencia"""
+    user_id = update.effective_user.id
+
+    if update.message.location:
+        loc = update.message.location
+        guardar_dato(
+            user_id=user_id, 
+            tipo="reporte_gps",
+            lat=loc.latitude, 
+            lon=loc.longitude
+        )
+    else:
+        texto = update.message.text.strip()
+        guardar_dato(user_id=user_id, tipo="reporte_texto", texto=texto)
+
+    await update.message.reply_text(
+        "✅ ¡Incidencia registrada con éxito! La información ya está en la nube "
+        "ayudando a la comunidad.\n\n"
+        "Si necesitas buscar una ruta, vuelve a usar /start"
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def recibir_ubicacion_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ubicación enviada ANTES de que el usuario haya dicho el destino."""
@@ -419,28 +415,31 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Crea transporte.db y la tabla 'reportes' si aún no existen
-    init_db()
 
     app = Application.builder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            ESPERANDO_PREGUNTA: [
-                MessageHandler(filters.LOCATION, recibir_ubicacion_inicial),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_pregunta),
-            ],
-            ESPERANDO_ORIGEN: [
-                MessageHandler(filters.LOCATION, recibir_origen_ubicacion),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_origen_texto),
-            ],
-            ESPERANDO_ORDEN: [
-                CallbackQueryHandler(recibir_orden, pattern="^(tiempo|costo)$")
-            ],
-        },
-        fallbacks=[CommandHandler("cancelar", cancelar)],
-    )
+            entry_points=[CommandHandler("start", start)],
+            states={
+                ESPERANDO_PREGUNTA: [
+                    MessageHandler(filters.LOCATION, recibir_ubicacion_inicial),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_pregunta),
+                ],
+                ESPERANDO_ORIGEN: [
+                    MessageHandler(filters.LOCATION, recibir_origen_ubicacion),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_origen_texto),
+                ],
+                ESPERANDO_ORDEN: [
+                    CallbackQueryHandler(recibir_orden, pattern="^(tiempo|costo)$")
+                ],
+                # NUEVO: Aquí el bot espera el detalle del reporte
+                ESPERANDO_REPORTE: [
+                    MessageHandler(filters.LOCATION, procesar_reporte_final),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_reporte_final),
+                ]
+            },
+            fallbacks=[CommandHandler("cancelar", cancelar)],
+        )
 
     app.add_handler(conv_handler)
 
