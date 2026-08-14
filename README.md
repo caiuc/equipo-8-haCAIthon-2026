@@ -1,4 +1,4 @@
-# 🚌 TransitData Chile (DaaS)
+# 🚌 Trasporte Chile (DaaS)
 > **Infraestructura comunitaria de datos abiertos de transporte para democratizar la movilidad en regiones.**
 
 [![License: AGPL v3] pendiente
