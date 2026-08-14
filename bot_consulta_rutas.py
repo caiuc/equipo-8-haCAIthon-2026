@@ -32,7 +32,6 @@ Si un token ya se compartió alguna vez en un chat/repo, revócalo en
 BotFather (/revoke) y genera uno nuevo.
 """
 
-import math
 import hashlib
 import logging
 import os
@@ -62,8 +61,6 @@ from telegram.ext import (
     filters,
 )
 
-from motor_rutas import consultar_rutas_bd_real
-
 DATABASE_URL = "postgresql://neondb_owner:npg_yW7bu8JrnRho@ep-curly-pine-acbc6s87.sa-east-1.aws.neon.tech/neondb?sslmode=require"
 
 logging.basicConfig(
@@ -74,60 +71,12 @@ logger = logging.getLogger(__name__)
 
 TOKEN = "8820144153:AAFErZf1H_Bpnqt3LJoIJ9Lj_eDfxHm0YkQ"
 # Estados de la conversación
-ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN = range(3)
+ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN, ESPERANDO_REPORTE, ESPERANDO_PROPUESTA = range(5)
 
-DB_PATH = "transporte.db"
-
-
-# ---------------------------------------------------------------------------
-# conexion base de datos 
-# ---------------------------------------------------------------------------
-
-def guardar_reporte_en_nube(user_id, tipo, texto=None, lat=None, lon=None):
-  """Guarda el reporte directo en la nube de Neon"""
-  user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()
-  fecha = datetime.utcnow().isoformat()
-
-  try:
-    conn = psycopg2.connect(DATABASE_URL)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-            INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (user_hash, tipo, texto, lat, lon, fecha),
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
-    print("✅ Reporte guardado en la nube con éxito.")
-  except Exception as e:
-    print(f"❌ Error guardando en la base de datos: {e}")
 
 # ---------------------------------------------------------------------------
 # Capa de base de datos (SQLite nativo de Python, no requiere instalar nada)
 # ---------------------------------------------------------------------------
-
-def init_db() -> None:
-    """Crea el archivo de base de datos transporte.db y la tabla 'reportes' si no existen."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reportes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_hash TEXT,
-            tipo TEXT,
-            texto TEXT,
-            latitud REAL,
-            longitud REAL,
-            fecha_hora TEXT
-        )
-        """
-    )
-    conn.commit()
-    conn.close()
 
 
 def guardar_dato(
@@ -137,7 +86,7 @@ def guardar_dato(
     lat: float | None = None,
     lon: float | None = None,
 ) -> None:
-    """Guarda un registro en la base de datos.
+    """Guarda un registro directamente en la base de datos PostgreSQL en la nube (Neon).
 
     El user_id se guarda como hash (SHA-256) en vez de en texto plano,
     para no almacenar el ID real de Telegram directamente.
@@ -145,77 +94,55 @@ def guardar_dato(
     user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()
     fecha = datetime.now(timezone.utc).isoformat()
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        (user_hash, tipo, texto, lat, lon, fecha),
-    )
-    conn.commit()
-    conn.close()
-
-
+    try:
+        # Usamos psycopg2 y DATABASE_URL en lugar de sqlite3
+        conn = psycopg2.connect(DATABASE_URL)
+        cursor = conn.cursor()
+        
+        # IMPORTANTE: PostgreSQL usa %s en lugar de ? para las variables
+        cursor.execute(
+            """
+            INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (user_hash, tipo, texto, lat, lon, fecha),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        print(f"✅ Reporte tipo '{tipo}' guardado en la nube con éxito.")
+        
+    except Exception as e:
+        print(f"❌ Error guardando en la base de datos de Neon: {e}")
 # ---------------------------------------------------------------------------
 # Capa de datos de rutas (STUBS a reemplazar por la conexión real a tu BD)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Sugerencia:
+    nombre: str          # ej. "Colectivo 12 - Av. Grecia"
+    tipo: str            # "colectivo" | "liebre" | "micro" | etc.
+    tiempo_min: float    # minutos estimados
+    costo_clp: int       # costo estimado en pesos
 
 
-    # --- LOGICA MATEMATICA DE RUTAS (De tu script de NetworkX) ---
-    
-    def calcular_distancia_metros(lat1, lon1, lat2, lon2):
-      """Calcula la distancia física en metros usando la fórmula Haversine."""
-      r = 6371000  # Radio de la Tierra en metros
-      phi1, phi2 = math.radians(lat1), math.radians(lat2)
-      dphi = math.radians(lat2 - lat1)
-      dlambda = math.radians(lon2 - lon1)
-      a = (
-          math.sin(dphi / 2) ** 2
-          + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-      )
-      return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    
-    
-    def consultar_rutas_bd(origen: str, destino: str, orden: str) -> list[Sugerencia]:
-        """
-        Simulación de cálculo de ruta real usando coordenadas, 
-        reemplazando los datos hardcodeados.
-        """
-        # IMPORTANTE: En tu script, NetworkX construye el grafo con los puntos GTFS.
-        # Aquí tendrías que llamar a tu grafo 'G' para calcular nx.shortest_path
-        # Como el usuario escribe texto (ej: "Providencia"), y no sabemos sus coordenadas
-        # exactas aún sin usar geopy, haremos un mock más inteligente que simula
-        # el cálculo de distancia y tiempo basado en tu lógica de 25km/h (6.94 m/s).
-    
-        # Esto es una simulación de lo que haría tu motor.
-        # En una implementación final, aquí usarías geopy para obtener lat/lon de 'origen' y 'destino',
-        # y luego usarías nx.shortest_path en el grafo G que creaste con Pandas.
-    
-        print(f"Calculando ruta real entre '{origen}' y '{destino}'...")
-    
-        # Simularemos una distancia aleatoria basada en los nombres para la demostración
-        # En la vida real, calcular_distancia_metros() te dará la distancia real.
-        distancia_simulada_m = (len(origen) + len(destino)) * 500 # Simulación simple
-        
-        # Cálculo de tiempo real usando tu lógica (25 km/h)
-        tiempo_segundos = distancia_simulada_m / 6.94
-        tiempo_minutos_real = round(tiempo_segundos / 60, 1)
-    
-        resultados = [
-            Sugerencia("Ruta Óptima Calculada", "Micro", tiempo_min=tiempo_minutos_real, costo_clp=730),
-            Sugerencia("Ruta Alternativa", "Metro", tiempo_min=tiempo_minutos_real * 0.8, costo_clp=830), # El metro es más rápido
-        ]
-    
-        # Ordenar según preferencia
-        clave = (lambda s: s.tiempo_min) if orden == "tiempo" else (lambda s: s.costo_clp)
-        return sorted(resultados, key=clave)
-    
-    
+def consultar_rutas_bd(origen: str, destino: str, orden: str) -> list[Sugerencia]:
+    """
+    Reemplaza esto por tu consulta real a la base de datos
+    (SQL, ORM tipo SQLAlchemy/Prisma, o llamada a tu API interna).
+
+    `orden` es "tiempo" o "costo".
+    """
+    # --- MOCK de ejemplo, borrar cuando conectes la BD real ---
+    resultados = [
+        Sugerencia("Colectivo 12", "colectivo", tiempo_min=18, costo_clp=1200),
+        Sugerencia("Liebre Puente Alto", "liebre", tiempo_min=25, costo_clp=900),
+        Sugerencia("Micro 210", "micro", tiempo_min=22, costo_clp=800),
+    ]
+    clave = (lambda s: s.tiempo_min) if orden == "tiempo" else (lambda s: s.costo_clp)
+    return sorted(resultados, key=clave)
+
+
 def registrar_senal_bd(user_id: int, origen: str, destino: str, orden: str) -> None:
     """
     Reemplaza esto por el insert/evento real hacia tu base de datos
@@ -332,7 +259,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def recibir_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     texto = update.message.text.strip()
-    guardar_dato(user_id=update.effective_user.id, tipo="texto", texto=texto)
+    texto_lower = texto.lower()
+
+    # 1. DETECTAR INTENCIÓN DE REPORTE
+    palabras_clave = ["reporte", "reportar", "problema", "incidente", "taco", "choque"]
+    if any(palabra in texto_lower for palabra in palabras_clave):
+        await update.message.reply_text(
+            "🚨 *Modo Reporte Activado*\n"
+            "Entendido. Cuéntame con detalle qué está pasando o envíame tu ubicación "
+            "para registrar la incidencia en la base de datos comunitaria:",
+            parse_mode="Markdown"
+        )
+        return ESPERANDO_REPORTE
+
+    # 2. SI NO ES REPORTE, SIGUE EL FLUJO NORMAL DE RUTAS
+    guardar_dato(user_id=update.effective_user.id, tipo="consulta_ruta", texto=texto)
 
     # Si ya teníamos un origen guardado (ej. vino de una ubicación GPS
     # enviada antes de decir el destino), este mensaje es directamente
@@ -362,6 +303,29 @@ async def recibir_pregunta(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await pedir_origen(update, context)
     return ESPERANDO_ORIGEN
 
+async def procesar_reporte_final(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Guarda el detalle del reporte o la ubicación de la incidencia"""
+    user_id = update.effective_user.id
+
+    if update.message.location:
+        loc = update.message.location
+        guardar_dato(
+            user_id=user_id, 
+            tipo="reporte_gps",
+            lat=loc.latitude, 
+            lon=loc.longitude
+        )
+    else:
+        texto = update.message.text.strip()
+        guardar_dato(user_id=user_id, tipo="reporte_texto", texto=texto)
+
+    await update.message.reply_text(
+        "✅ ¡Incidencia registrada con éxito! La información ya está en la nube "
+        "ayudando a la comunidad.\n\n"
+        "Si necesitas buscar una ruta, vuelve a usar /start"
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def recibir_ubicacion_inicial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Ubicación enviada ANTES de que el usuario haya dicho el destino."""
@@ -413,7 +377,7 @@ async def recibir_orden(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     registrar_senal_bd(user_id, origen, destino, orden)
 
     # 2) Hacer la consulta real y traer las sugerencias
-    sugerencias = consultar_rutas_bd_real(origen, destino, orden)
+    sugerencias = consultar_rutas_bd(origen, destino, orden)
 
     # 3) Mostrar todas las sugerencias
     if not sugerencias:
@@ -445,33 +409,71 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+
+async def iniciar_propuesta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Se activa cuando el usuario escribe /proponer"""
+    context.user_data.clear()
+    await update.message.reply_text(
+        "💡 *Modo Propuesta de Ruta*\n"
+        "¡Genial! Escribe la ruta que te gustaría sugerir. "
+        "Por favor, intenta incluir de dónde sale, hacia dónde va, y qué micro o colectivo tomaste:",
+        parse_mode="Markdown"
+    )
+    return ESPERANDO_PROPUESTA
+
+async def procesar_propuesta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Guarda la propuesta de ruta en la base de datos en la nube"""
+    texto = update.message.text.strip()
+    user_id = update.effective_user.id
+    
+    # Se guarda en Neon bajo la etiqueta "propuesta_ruta"
+    guardar_dato(user_id=user_id, tipo="propuesta_ruta", texto=texto)
+    
+    await update.message.reply_text(
+        "✅ ¡Propuesta guardada con éxito! Gracias por ayudar a construir y mejorar "
+        "la red comunitaria de transporte.\n\n"
+        "Si quieres buscar una ruta ahora, escribe /start"
+    )
+    context.user_data.clear()
+    return ConversationHandler.END
+
 # ---------------------------------------------------------------------------
 # Arranque del bot
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Crea transporte.db y la tabla 'reportes' si aún no existen
-    init_db()
 
     app = Application.builder().token(TOKEN).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            ESPERANDO_PREGUNTA: [
-                MessageHandler(filters.LOCATION, recibir_ubicacion_inicial),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_pregunta),
+            entry_points=[
+                CommandHandler("start", start),
+                CommandHandler("proponer", iniciar_propuesta)  # Aquí agregamos el nuevo comando
             ],
-            ESPERANDO_ORIGEN: [
-                MessageHandler(filters.LOCATION, recibir_origen_ubicacion),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_origen_texto),
-            ],
-            ESPERANDO_ORDEN: [
-                CallbackQueryHandler(recibir_orden, pattern="^(tiempo|costo)$")
-            ],
-        },
-        fallbacks=[CommandHandler("cancelar", cancelar)],
-    )
+            states={
+                ESPERANDO_PREGUNTA: [
+                    MessageHandler(filters.LOCATION, recibir_ubicacion_inicial),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_pregunta),
+                ],
+                ESPERANDO_ORIGEN: [
+                    MessageHandler(filters.LOCATION, recibir_origen_ubicacion),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_origen_texto),
+                ],
+                ESPERANDO_ORDEN: [
+                    CallbackQueryHandler(recibir_orden, pattern="^(tiempo|costo)$")
+                ],
+                # Aquí el bot espera el detalle del reporte
+                ESPERANDO_REPORTE: [
+                    MessageHandler(filters.LOCATION, procesar_reporte_final),
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_reporte_final),
+                ],
+                # NUEVO: Aquí el bot espera que el usuario escriba su propuesta
+                ESPERANDO_PROPUESTA: [
+                    MessageHandler(filters.TEXT & ~filters.COMMAND, procesar_propuesta)
+                ]
+            },
+            fallbacks=[CommandHandler("cancelar", cancelar)],
+        )
 
     app.add_handler(conv_handler)
 
