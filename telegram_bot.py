@@ -1,4 +1,4 @@
-"""Telegram bot API: 8820144153:AAFErZf1H_Bpnqt3LJoIJ9Lj_eDfxHm0YkQ"""
+"""Telegram bot API: """
 """
 Bot de Telegram - Flujo de consulta de rutas
 
@@ -38,7 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = "TU_TOKEN_DE_BOTFATHER_AQUI"
+TOKEN = "8820144153:AAFErZf1H_Bpnqt3LJoIJ9Lj_eDfxHm0YkQ"
 
 # Estados de la conversación
 ESPERANDO_PREGUNTA, ESPERANDO_ORDEN = range(2)
