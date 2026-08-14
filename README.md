@@ -55,6 +55,7 @@ El backend opera como un motor invisible dividido en cuatro capas esenciales:
 * **Georreferenciación Base:** [OpenStreetMap (OSM)](https://www.openstreetmap.org/) para el trazado vial y cálculo de distancias de shapes.
 * **Manipulación y Procesamiento de Datos:** [Pandas](https://pandas.pydata.org/) para limpieza, filtrado y consolidación tabular.
 * **Datos Base de Calibración:** Feeds oficiales DTPM (GTFS Santiago, corte julio del año en curso) utilizados como benchmark y validación de esquemas.
+* **Uso de la librería de Telegram
 
 ---
 
@@ -74,6 +75,10 @@ El backend opera como un motor invisible dividido en cuatro capas esenciales:
 
 * **Cadencia de Publicación:** Actualizaciones y liberaciones trimestrales (**cada 3 meses**) de datasets consolidados en formato GTFS abierto para la comunidad e investigadores.
 * **Tiempo Real:** Canales dinámicos accesibles para endpoints autorizados.
+
+## Declaración de uso de IA
+
+* **Uso de IA para la elaboración del código y del README, se empleó Cloud, Gemine y ChatGPT.
 
 ---
 
