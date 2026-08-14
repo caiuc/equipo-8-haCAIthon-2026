@@ -69,8 +69,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-
+TOKEN = "8820144153:AAFErZf1H_Bpnqt3LJoIJ9Lj_eDfxHm0YkQ"
 # Estados de la conversación
 ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN, ESPERANDO_REPORTE = range(4)
 
