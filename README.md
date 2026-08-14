@@ -2,8 +2,6 @@
 > **Infraestructura comunitaria de datos abiertos de transporte para democratizar la movilidad en regiones.**
 
 [![License: AGPL v3] pendiente
-[![GTFS Spec] pendiente
-[![Data Release] pendiente 
 
 ---
 
