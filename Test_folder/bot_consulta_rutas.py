@@ -37,6 +37,9 @@ import logging
 import os
 import re
 import sqlite3
+from datetime import datetime
+import hashlib
+import psycopg2
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -58,6 +61,8 @@ from telegram.ext import (
     filters,
 )
 
+DATABASE_URL = "postgresql://neondb_owner:npg_yW7bu8JrnRho@ep-curly-pine-acbc6s87.sa-east-1.aws.neon.tech/neondb?sslmode=require"
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -72,6 +77,32 @@ ESPERANDO_PREGUNTA, ESPERANDO_ORIGEN, ESPERANDO_ORDEN = range(3)
 DB_PATH = "transporte.db"
 
 
+# ---------------------------------------------------------------------------
+# Base de datos conexion con nube
+# ---------------------------------------------------------------------------
+
+def guardar_reporte_en_nube(user_id, tipo, texto=None, lat=None, lon=None):
+  """Guarda el reporte directo en la nube de Neon"""
+  user_hash = hashlib.sha256(str(user_id).encode()).hexdigest()
+  fecha = datetime.utcnow().isoformat()
+
+  try:
+    conn = psycopg2.connect(DATABASE_URL)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+            INSERT INTO reportes (user_hash, tipo, texto, latitud, longitud, fecha_hora)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (user_hash, tipo, texto, lat, lon, fecha),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    print("✅ Reporte guardado en la nube con éxito.")
+  except Exception as e:
+    print(f"❌ Error guardando en la base de datos: {e}")
+     
 # ---------------------------------------------------------------------------
 # Capa de base de datos (SQLite nativo de Python, no requiere instalar nada)
 # ---------------------------------------------------------------------------
