@@ -55,7 +55,7 @@ El backend opera como un motor invisible dividido en cuatro capas esenciales:
 * **Georreferenciación Base:** [OpenStreetMap (OSM)](https://www.openstreetmap.org/) para el trazado vial y cálculo de distancias de shapes.
 * **Manipulación y Procesamiento de Datos:** [Pandas](https://pandas.pydata.org/) para limpieza, filtrado y consolidación tabular.
 * **Datos Base de Calibración:** Feeds oficiales DTPM (GTFS Santiago, corte julio del año en curso) utilizados como benchmark y validación de esquemas.
-* **Uso de la librería de Telegram
+* **Uso de la librería de Telegram, Folium, Osmnx, NetworkX, Pandas, SQLALSCHMI, Math, REREQUEST, DATACLASSES, GEOPY, HASHLIB, Login, SQLITE3 y 5PSYCOPG2 
 
 ---
 
